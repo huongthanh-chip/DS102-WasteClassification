@@ -1,0 +1,10 @@
+{
+  "Electronics": 0,
+  "Glass": 1,
+  "Metal": 2,
+  "Organic": 3,
+  "Other": 4,
+  "Paper": 5,
+  "Plastic": 6,
+  "Textiles": 7
+}

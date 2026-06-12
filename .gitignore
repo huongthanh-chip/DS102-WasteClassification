@@ -1,0 +1,9 @@
+# Thư mục dữ liệu nặng
+Augmented_Dataset/
+Cleaned_Dataset/
+Prepared_Dataset/
+train/
+
+# Python cache (nên ignore)
+__pycache__/
+Features/
