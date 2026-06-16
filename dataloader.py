@@ -3,13 +3,13 @@
 Dataloader for the waste image classification project.
 
 Default input:
-  Cleaned_Dataset/train/<class_name>/*.png
+  Augmented_Dataset/train/<class_name>/*.png
 
 Main usage:
   from dataloader import build_dataloaders
 
   train_loader, val_loader, info = build_dataloaders(
-      data_dir="Cleaned_Dataset/train",
+      data_dir="Augmented_Dataset/train",
       batch_size=32,
       val_size=0.2,
       use_weighted_sampler=True,
@@ -49,7 +49,7 @@ except Exception:
 
 
 PROJECT_ROOT = Path(__file__).resolve().parent
-DEFAULT_DATA_DIR = PROJECT_ROOT / "Cleaned_Dataset" / "train"
+DEFAULT_DATA_DIR = PROJECT_ROOT / "Augmented_Dataset" / "train"
 DEFAULT_SPLIT_DIR = PROJECT_ROOT / "Prepared_Dataset"
 DEFAULT_LABEL_MAP = PROJECT_ROOT / "Features" / "label_map.json"
 DEFAULT_CLASS_WEIGHTS = PROJECT_ROOT / "Features" / "class_weights.npy"
