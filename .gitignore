@@ -2,6 +2,7 @@
 Augmented_Dataset/
 Cleaned_Dataset/
 Prepared_Dataset/
+Prepared_Clean_Split/
 train/
 
 # Python cache (nên ignore)

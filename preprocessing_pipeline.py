@@ -26,6 +26,7 @@ Recheck & fixes vs. the original notebook:
 import argparse
 import hashlib
 import json
+import os
 import random
 import shutil
 import warnings
@@ -46,6 +47,8 @@ from tqdm import tqdm
 # -------------------------------------------------------------
 # Optional libraries
 # -------------------------------------------------------------
+os.environ.setdefault("NO_ALBUMENTATIONS_UPDATE", "1")
+
 try:
     import albumentations as A
     ALBU_AVAILABLE = True
@@ -408,10 +411,7 @@ def extract_color_hist(
 
 # CNN embedding (optional)
 if TORCH_AVAILABLE:
-    _cnn_model = models.resnet50(weights="IMAGENET1K_V2")
-    _cnn_model.fc = torch.nn.Identity()
-    _cnn_model.eval()
-
+    _cnn_model = None
     _cnn_transform = T.Compose(
         [
             T.Resize((TARGET_SIZE, TARGET_SIZE)),
@@ -421,6 +421,11 @@ if TORCH_AVAILABLE:
     )
 
     def extract_cnn_embedding(img_path: Path) -> np.ndarray:
+        global _cnn_model
+        if _cnn_model is None:
+            _cnn_model = models.resnet50(weights="IMAGENET1K_V2")
+            _cnn_model.fc = torch.nn.Identity()
+            _cnn_model.eval()
         img = Image.open(img_path).convert("RGB")
         tensor = _cnn_transform(img).unsqueeze(0)
         with torch.no_grad():
@@ -625,35 +630,43 @@ def augment_class(
     cls_name = cls_dir.name
     src_imgs = get_images(cls_dir)
     n_current = len(src_imgs)
-    n_needed = max(0, target_count - n_current)
+    dst_cls = dst_dir / cls_name
+    n_existing = len(get_images(dst_cls)) if dst_cls.exists() else 0
+    n_needed = max(0, target_count - max(n_current, n_existing))
 
-    print(f"  {cls_name:<15}: {n_current} images -> need {n_needed} more")
+    print(f"  {cls_name:<15}: {n_current} source, {n_existing} existing -> need {n_needed} more")
 
     if n_current == 0:
         if dry_run:
             return n_needed
         raise FileNotFoundError(f"No source images in {cls_dir}.")
 
-    dst_cls = dst_dir / cls_name
     if not dry_run:
         dst_cls.mkdir(parents=True, exist_ok=True)
         # Copy originals
         for p in src_imgs:
-            shutil.copy2(p, dst_cls / p.name)
+            dst = dst_cls / p.name
+            if not dst.exists():
+                shutil.copy2(p, dst)
 
     if dry_run or n_needed == 0:
         return n_needed
 
-    aug_count = 0
-    while aug_count < n_needed:
+    aug_count = len([p for p in get_images(dst_cls) if p.name.startswith("aug_")])
+    created_count = 0
+    while len(get_images(dst_cls)) < target_count:
         src = random.choice(src_imgs)
         aug_img = aug_pipeline(Image.open(src).convert("RGB"))
         out_name = f"aug_{aug_count:05d}_{src.name}"
-        aug_img.save(dst_cls / out_name)
+        out_path = dst_cls / out_name
         aug_count += 1
+        if out_path.exists():
+            continue
+        aug_img.save(out_path)
+        created_count += 1
 
-    print(f"    -> Created {aug_count} augmented images")
-    return aug_count
+    print(f"    -> Created {created_count} augmented images")
+    return created_count
 
 
 def run_augmentation(
@@ -661,11 +674,17 @@ def run_augmentation(
     dst_dir: Path,
     target_count: int = 2500,
     dry_run: bool = True,
+    classes: List[str] | None = None,
 ):
     if dst_dir.exists() and not dry_run:
-        shutil.rmtree(dst_dir)
+        try:
+            shutil.rmtree(dst_dir)
+        except PermissionError as exc:
+            print(f"[WARN] Could not remove {dst_dir}: {exc}")
+            print("[WARN] Reusing existing augmented files where possible.")
 
-    for cls in CLASSES:
+    classes = classes or CLASSES
+    for cls in classes:
         cls_dir = src_dir / cls
         n_imgs = len(get_images(cls_dir))
         pipeline = aug_strong if n_imgs < 1500 else aug_light
@@ -673,7 +692,7 @@ def run_augmentation(
 
     if not dry_run:
         print("\n=== Stats after augmentation ===")
-        for cls in CLASSES:
+        for cls in classes:
             n = len(get_images(dst_dir / cls))
             print(f"  {cls:<15}: {n}")
 

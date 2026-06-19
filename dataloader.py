@@ -21,8 +21,10 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import os
 import random
 import shutil
+import stat
 from collections import Counter
 from pathlib import Path
 from typing import Callable, Iterable
@@ -50,7 +52,8 @@ except Exception:
 
 PROJECT_ROOT = Path(__file__).resolve().parent
 DEFAULT_DATA_DIR = PROJECT_ROOT / "Cleaned_Dataset" / "train"
-DEFAULT_SPLIT_DIR = PROJECT_ROOT / "Prepared_Dataset"
+DEFAULT_SPLIT_DIR = PROJECT_ROOT / "Prepared_Clean_Split"
+DEFAULT_AUGMENTED_TRAIN_DIR = DEFAULT_SPLIT_DIR / "train_augmented"
 DEFAULT_LABEL_MAP = PROJECT_ROOT / "Features" / "label_map.json"
 DEFAULT_CLASS_WEIGHTS = PROJECT_ROOT / "Features" / "class_weights.npy"
 
@@ -360,6 +363,44 @@ def build_dataloaders_from_split_folder(
     )
 
 
+def build_dataloaders_from_train_val_dirs(
+    train_dir: str | Path,
+    val_dir: str | Path,
+    batch_size: int = 32,
+    image_size: int = TARGET_SIZE,
+    num_workers: int = 0,
+    augment_train: bool = True,
+    use_weighted_sampler: bool = False,
+    label_map_path: str | Path = DEFAULT_LABEL_MAP,
+    return_path: bool = False,
+    pin_memory: bool | None = None,
+) -> tuple[DataLoader, DataLoader, dict]:
+    if not TORCH_AVAILABLE:
+        raise ImportError("Install torch and torchvision to build dataloaders.")
+
+    train_dir = Path(train_dir)
+    val_dir = Path(val_dir)
+    label_map = load_label_map(label_map_path) or discover_label_map(train_dir)
+    train_paths, train_labels, label_map = scan_image_folder(train_dir, label_map=label_map)
+    val_paths, val_labels, _ = scan_image_folder(val_dir, label_map=label_map)
+
+    return _make_dataloaders_from_paths(
+        train_paths=train_paths,
+        val_paths=val_paths,
+        train_labels=train_labels,
+        val_labels=val_labels,
+        label_map=label_map,
+        data_source=train_dir.parent,
+        batch_size=batch_size,
+        image_size=image_size,
+        num_workers=num_workers,
+        augment_train=augment_train,
+        use_weighted_sampler=use_weighted_sampler,
+        return_path=return_path,
+        pin_memory=pin_memory,
+    )
+
+
 def build_dataloaders(
     data_dir: str | Path = DEFAULT_DATA_DIR,
     batch_size: int = 32,
@@ -412,6 +453,24 @@ def build_dataloaders(
     )
 
 
+def remove_tree(path: str | Path) -> bool:
+    path = Path(path)
+    if not path.exists():
+        return True
+
+    def handle_remove_error(function, failed_path, _exc_info) -> None:
+        os.chmod(failed_path, stat.S_IWRITE)
+        function(failed_path)
+
+    try:
+        shutil.rmtree(path, onexc=handle_remove_error)
+    except PermissionError as exc:
+        print(f"[WARN] Could not remove {path}: {exc}")
+        print("[WARN] Reusing existing split files where possible.")
+        return False
+    return True
+
+
 def materialize_split_folder(
     train_paths: list[Path],
     val_paths: list[Path],
@@ -434,7 +493,7 @@ def materialize_split_folder(
                 "Use overwrite=True or --overwrite-split to rebuild it."
             )
         if overwrite:
-            shutil.rmtree(output_dir)
+            remove_tree(output_dir)
 
     idx_to_class = {idx: cls for cls, idx in label_map.items()}
     manifest_rows: list[dict[str, str | int]] = []
@@ -444,6 +503,17 @@ def materialize_split_folder(
             class_name = idx_to_class[int(label)]
             dst = output_dir / split / class_name / src.name
             dst.parent.mkdir(parents=True, exist_ok=True)
+            if dst.exists():
+                manifest_rows.append(
+                    {
+                        "split": split,
+                        "path": str(dst),
+                        "source_path": str(src),
+                        "label": int(label),
+                        "class_name": class_name,
+                    }
+                )
+                continue
             if link_mode == "hardlink":
                 try:
                     dst.hardlink_to(src)
@@ -473,6 +543,31 @@ def materialize_split_folder(
         )
         writer.writeheader()
         writer.writerows(manifest_rows)
+
+
+def augment_split_train_folder(
+    train_dir: str | Path,
+    output_dir: str | Path = DEFAULT_AUGMENTED_TRAIN_DIR,
+    target_count: int = 2500,
+    label_map: dict[str, int] | None = None,
+) -> None:
+    train_dir = Path(train_dir)
+    output_dir = Path(output_dir)
+    classes = (
+        [class_name for class_name, _ in sorted(label_map.items(), key=lambda item: item[1])]
+        if label_map is not None
+        else sorted([p.name for p in train_dir.iterdir() if p.is_dir()])
+    )
+
+    from preprocessing_pipeline import run_augmentation
+
+    run_augmentation(
+        src_dir=train_dir,
+        dst_dir=output_dir,
+        target_count=target_count,
+        dry_run=False,
+        classes=classes,
+    )
 
 
 def export_split_csv(
@@ -515,6 +610,23 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--no-augment", action="store_true")
     parser.add_argument("--weighted-sampler", action="store_true")
     parser.add_argument("--export-split", type=Path, default=None)
+    parser.add_argument(
+        "--augment-split-train",
+        action="store_true",
+        help="After splitting clean data, augment only split-dir/train using preprocessing_pipeline.",
+    )
+    parser.add_argument(
+        "--augmented-train-dir",
+        type=Path,
+        default=DEFAULT_AUGMENTED_TRAIN_DIR,
+        help="Output folder for augmented train split.",
+    )
+    parser.add_argument(
+        "--target-per-class",
+        type=int,
+        default=2500,
+        help="Target images per class for --augment-split-train.",
+    )
     parser.add_argument(
         "--make-split-folder",
         action="store_true",
@@ -576,7 +688,7 @@ def main() -> None:
         )
         print(f"\nSaved split CSV -> {args.export_split}")
 
-    if args.make_split_folder:
+    if args.make_split_folder or args.augment_split_train:
         materialize_split_folder(
             train_paths=train_paths,
             val_paths=val_paths,
@@ -590,18 +702,40 @@ def main() -> None:
         print(f"\nSaved split folder -> {args.split_dir}")
         print(f"Manifest          -> {args.split_dir / 'split_manifest.csv'}")
 
-    if TORCH_AVAILABLE:
-        loader_data_dir = args.split_dir if args.make_split_folder else args.data_dir
-        train_loader, val_loader, info = build_dataloaders(
-            data_dir=loader_data_dir,
-            batch_size=args.batch_size,
-            val_size=args.val_size,
-            image_size=args.image_size,
-            seed=args.seed,
-            num_workers=args.num_workers,
-            augment_train=not args.no_augment,
-            use_weighted_sampler=args.weighted_sampler,
+    if args.augment_split_train:
+        print("\n=== AUGMENT SPLIT TRAIN ONLY ===")
+        augment_split_train_folder(
+            train_dir=args.split_dir / "train",
+            output_dir=args.augmented_train_dir,
+            target_count=args.target_per_class,
+            label_map=label_map,
         )
+        print(f"Augmented train   -> {args.augmented_train_dir}")
+        print(f"Validation kept   -> {args.split_dir / 'val'}")
+
+    if TORCH_AVAILABLE:
+        if args.augment_split_train:
+            train_loader, val_loader, info = build_dataloaders_from_train_val_dirs(
+                train_dir=args.augmented_train_dir,
+                val_dir=args.split_dir / "val",
+                batch_size=args.batch_size,
+                image_size=args.image_size,
+                num_workers=args.num_workers,
+                augment_train=False,
+                use_weighted_sampler=args.weighted_sampler,
+            )
+        else:
+            loader_data_dir = args.split_dir if args.make_split_folder else args.data_dir
+            train_loader, val_loader, info = build_dataloaders(
+                data_dir=loader_data_dir,
+                batch_size=args.batch_size,
+                val_size=args.val_size,
+                image_size=args.image_size,
+                seed=args.seed,
+                num_workers=args.num_workers,
+                augment_train=not args.no_augment,
+                use_weighted_sampler=args.weighted_sampler,
+            )
         images, targets = next(iter(train_loader))
         print(f"\nBatch image tensor: {tuple(images.shape)}")
         print(f"Batch label tensor: {tuple(targets.shape)}")
