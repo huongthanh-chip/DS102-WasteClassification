@@ -3,15 +3,14 @@
 Dataloader for the waste image classification project.
 
 Default input:
-  Cleaned_Dataset/train/<class_name>/*.png
+  01-data/Merged_Dataset/train/<class_name>/*.png
 
 Main usage:
   from dataloader import build_dataloaders
 
   train_loader, val_loader, info = build_dataloaders(
-      data_dir="Cleaned_Dataset/train",
+      data_dir="01-data/Prepared_Merged_Split_60_20_20",
       batch_size=32,
-      val_size=0.2,
       use_weighted_sampler=True,
   )
 """
@@ -50,18 +49,19 @@ except Exception:
     TORCH_AVAILABLE = False
 
 
-PROJECT_ROOT = Path(__file__).resolve().parent
-DEFAULT_DATA_DIR = PROJECT_ROOT / "Cleaned_Dataset" / "train"
-DEFAULT_SPLIT_DIR = PROJECT_ROOT / "Prepared_Clean_Split"
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_DATA_DIR = PROJECT_ROOT / "01-data" / "Merged_Dataset" / "train"
+DEFAULT_SPLIT_DIR = PROJECT_ROOT / "01-data" / "Prepared_Merged_Split_60_20_20"
 DEFAULT_AUGMENTED_TRAIN_DIR = DEFAULT_SPLIT_DIR / "train_augmented"
-DEFAULT_LABEL_MAP = PROJECT_ROOT / "Features" / "label_map.json"
-DEFAULT_CLASS_WEIGHTS = PROJECT_ROOT / "Features" / "class_weights.npy"
+DEFAULT_LABEL_MAP = PROJECT_ROOT / "04-features" / "label_map.json"
+DEFAULT_CLASS_WEIGHTS = PROJECT_ROOT / "04-features" / "class_weights.npy"
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tif", ".tiff"}
 TARGET_SIZE = 224
 DATASET_MEAN = (0.6320, 0.6092, 0.5805)
 DATASET_STD = (0.2012, 0.1991, 0.2094)
 RANDOM_STATE = 42
+DEFAULT_VAL_SIZE = 0.25
 
 
 def seed_everything(seed: int = RANDOM_STATE) -> None:
@@ -133,7 +133,7 @@ def scan_image_folder(
 def stratified_train_val_split(
     paths: list[Path],
     labels: list[int],
-    val_size: float = 0.2,
+    val_size: float = DEFAULT_VAL_SIZE,
     seed: int = RANDOM_STATE,
 ) -> tuple[list[Path], list[Path], list[int], list[int]]:
     counts = Counter(labels)
@@ -404,7 +404,7 @@ def build_dataloaders_from_train_val_dirs(
 def build_dataloaders(
     data_dir: str | Path = DEFAULT_DATA_DIR,
     batch_size: int = 32,
-    val_size: float = 0.2,
+    val_size: float = DEFAULT_VAL_SIZE,
     image_size: int = TARGET_SIZE,
     seed: int = RANDOM_STATE,
     num_workers: int = 0,
@@ -603,7 +603,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--data-dir", type=Path, default=DEFAULT_DATA_DIR)
     parser.add_argument("--split-dir", type=Path, default=DEFAULT_SPLIT_DIR)
     parser.add_argument("--batch-size", type=int, default=32)
-    parser.add_argument("--val-size", type=float, default=0.2)
+    parser.add_argument("--val-size", type=float, default=DEFAULT_VAL_SIZE)
     parser.add_argument("--image-size", type=int, default=TARGET_SIZE)
     parser.add_argument("--seed", type=int, default=RANDOM_STATE)
     parser.add_argument("--num-workers", type=int, default=0)
@@ -618,7 +618,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--augmented-train-dir",
         type=Path,
-        default=DEFAULT_AUGMENTED_TRAIN_DIR,
+        default=None,
         help="Output folder for augmented train split.",
     )
     parser.add_argument(
@@ -688,7 +688,7 @@ def main() -> None:
         )
         print(f"\nSaved split CSV -> {args.export_split}")
 
-    if args.make_split_folder or args.augment_split_train:
+    if args.make_split_folder:
         materialize_split_folder(
             train_paths=train_paths,
             val_paths=val_paths,
@@ -703,20 +703,39 @@ def main() -> None:
         print(f"Manifest          -> {args.split_dir / 'split_manifest.csv'}")
 
     if args.augment_split_train:
+        split_train_dir = args.split_dir / "train"
+        split_val_dir = args.split_dir / "val"
+        if not split_train_dir.exists() or not split_val_dir.exists():
+            materialize_split_folder(
+                train_paths=train_paths,
+                val_paths=val_paths,
+                train_labels=train_labels,
+                val_labels=val_labels,
+                label_map=label_map,
+                output_dir=args.split_dir,
+                overwrite=args.overwrite_split,
+                link_mode=args.link_mode,
+            )
+            print(f"\nSaved split folder -> {args.split_dir}")
+            print(f"Manifest          -> {args.split_dir / 'split_manifest.csv'}")
+
+        split_label_map = load_label_map(DEFAULT_LABEL_MAP) or discover_label_map(split_train_dir)
+        augmented_train_dir = args.augmented_train_dir or (args.split_dir / "train_augmented")
         print("\n=== AUGMENT SPLIT TRAIN ONLY ===")
         augment_split_train_folder(
-            train_dir=args.split_dir / "train",
-            output_dir=args.augmented_train_dir,
+            train_dir=split_train_dir,
+            output_dir=augmented_train_dir,
             target_count=args.target_per_class,
-            label_map=label_map,
+            label_map=split_label_map,
         )
-        print(f"Augmented train   -> {args.augmented_train_dir}")
-        print(f"Validation kept   -> {args.split_dir / 'val'}")
+        print(f"Augmented train   -> {augmented_train_dir}")
+        print(f"Validation kept   -> {split_val_dir}")
 
     if TORCH_AVAILABLE:
         if args.augment_split_train:
+            augmented_train_dir = args.augmented_train_dir or (args.split_dir / "train_augmented")
             train_loader, val_loader, info = build_dataloaders_from_train_val_dirs(
-                train_dir=args.augmented_train_dir,
+                train_dir=augmented_train_dir,
                 val_dir=args.split_dir / "val",
                 batch_size=args.batch_size,
                 image_size=args.image_size,

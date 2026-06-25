@@ -1,10 +1,25 @@
 # Thư mục dữ liệu nặng
-Augmented_Dataset/
 Cleaned_Dataset/
-Prepared_Dataset/
 Prepared_Clean_Split/
-train/
 
 # Python cache (nên ignore)
 __pycache__/
 Features/
+
+# Heavy local data
+01-data/
+Augmented_Dataset/
+Merged_Dataset/
+Prepared_Merged_Split_60_20_20/
+Prepared_Merged_Clean_Split_60_20_20/
+
+# Generated model artifacts
+05-models/
+
+# Generated feature matrices
+04-features/*.npz
+
+# Python cache
+**/__pycache__/
+*.pyc
+*.pyo

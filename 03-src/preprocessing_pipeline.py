@@ -76,6 +76,9 @@ DATA_DIR   = Path("train")
 CLEAN_DIR  = Path("Cleaned_Dataset/train")
 AUG_DIR    = Path("Augmented_Dataset/train")
 FEAT_DIR   = Path("Features")
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DEFAULT_SPLIT_DIR = PROJECT_ROOT / "01-data" / "Prepared_Merged_Split_60_20_20"
+DEFAULT_CLEAN_SPLIT_DIR = PROJECT_ROOT / "01-data" / "Prepared_Merged_Clean_Split_60_20_20"
 
 IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 CLASSES    = sorted([d.name for d in DATA_DIR.iterdir() if d.is_dir()]) if DATA_DIR.exists() else []
@@ -90,6 +93,16 @@ BLUR_THRESHOLD        = 20.0
 # -------------------------------------------------------------
 # Utilities
 # -------------------------------------------------------------
+def discover_classes(root: Path) -> List[str]:
+    return sorted([d.name for d in root.iterdir() if d.is_dir()]) if root.exists() else []
+
+
+def set_classes_from(root: Path) -> List[str]:
+    global CLASSES
+    CLASSES = discover_classes(root)
+    return CLASSES
+
+
 def get_images(root: Path, recursive: bool = True) -> List[Path]:
     if not root.exists():
         return []
@@ -111,6 +124,27 @@ def compute_md5(filepath: Path, chunk_size: int = 65536) -> str:
         while chunk := f.read(chunk_size):
             h.update(chunk)
     return h.hexdigest()
+
+
+def compute_hashes(paths: List[Path]) -> Dict[str, Path]:
+    hashes = {}
+    for path in tqdm(paths, desc="Build reference hashes"):
+        try:
+            hashes[compute_md5(path)] = path
+        except Exception as exc:
+            print(f"  [WARN] MD5 failed for {path.name}: {exc}")
+    return hashes
+
+
+def find_paths_with_hashes(data_dir: Path, ref_hashes: Dict[str, Path]) -> Set[Path]:
+    matched = set()
+    for path in tqdm(get_images(data_dir), desc="Cross-split duplicate scan"):
+        try:
+            if compute_md5(path) in ref_hashes:
+                matched.add(path.resolve())
+        except Exception as exc:
+            print(f"  [WARN] MD5 failed for {path.name}: {exc}")
+    return matched
 
 
 # -------------------------------------------------------------
@@ -312,6 +346,7 @@ def build_cleaned_dataset(
     df_blur: pd.DataFrame,
     remove_blur: bool = True,
     dry_run: bool = True,
+    extra_exclude: Set[Path] | None = None,
 ) -> List[Path]:
     exclude: Set[Path] = set()
 
@@ -331,6 +366,10 @@ def build_cleaned_dataset(
     if remove_blur and not df_blur.empty:
         for _, row in df_blur[df_blur["is_blurry"]].iterrows():
             exclude.add(Path(row["path"]).resolve())
+
+    if extra_exclude:
+        exclude.update(extra_exclude)
+        print(f"Extra excluded paths   : {len(extra_exclude)}")
 
     all_imgs = get_images(src_dir)
     keep = [p for p in all_imgs if p.resolve() not in exclude]
@@ -353,6 +392,97 @@ def build_cleaned_dataset(
             print(f"  {cls:<15}: {n}")
 
     return keep
+
+
+def clean_one_split(
+    src_dir: Path,
+    dst_dir: Path,
+    args: argparse.Namespace,
+    extra_exclude: Set[Path] | None = None,
+) -> List[Path]:
+    print("\n" + "=" * 60)
+    print(f"CLEAN SPLIT: {src_dir.name}")
+    print("=" * 60)
+    print(f"Source : {src_dir}")
+    print(f"Output : {dst_dir}")
+    print(f"Classes: {CLASSES}")
+
+    print("\n=== EXACT DEDUPLICATION (MD5) ===")
+    dup_groups = exact_dedup(src_dir)
+
+    if args.remove_near_dup:
+        print("\n=== NEAR-DUPLICATE (pHash) ===")
+        near_dup_pairs = find_near_dups(
+            src_dir,
+            threshold=args.phash_threshold,
+            sample_per_class=args.phash_sample,
+        )
+    else:
+        print("\n=== NEAR-DUPLICATE (pHash) ===")
+        print("Skipped (--remove-near-dup not set).")
+        near_dup_pairs = []
+
+    print("\n=== LOW-CONTENT FILTER ===")
+    df_low = find_low_content_images(src_dir)
+
+    print("\n=== BLUR DETECTION ===")
+    df_blur = find_blurry_images(src_dir, threshold=args.blur_threshold)
+
+    print("\n=== BUILD CLEANED SPLIT ===")
+    kept = build_cleaned_dataset(
+        src_dir=src_dir,
+        dst_dir=dst_dir,
+        dup_groups=dup_groups,
+        near_dup_pairs=near_dup_pairs,
+        df_low=df_low,
+        df_blur=df_blur,
+        remove_blur=args.remove_blur,
+        dry_run=args.dry_run,
+        extra_exclude=extra_exclude,
+    )
+    return kept
+
+
+def clean_train_val_splits(args: argparse.Namespace) -> None:
+    split_dir = Path(args.split_dir)
+    output_dir = Path(args.clean_split_output)
+    train_src = split_dir / "train"
+    val_src = split_dir / "val"
+    train_dst = output_dir / "train"
+    val_dst = output_dir / "val"
+
+    if not train_src.exists() or not val_src.exists():
+        raise FileNotFoundError(f"Expected split folders: {train_src} and {val_src}")
+
+    set_classes_from(train_src)
+    if not CLASSES:
+        raise ValueError(f"No class subdirectories found in {train_src}")
+
+    kept_train = clean_one_split(train_src, train_dst, args)
+    train_hashes = compute_hashes(kept_train)
+    val_cross_dups = find_paths_with_hashes(val_src, train_hashes)
+    if val_cross_dups:
+        print(f"\nVal images duplicated with cleaned train: {len(val_cross_dups)}")
+    kept_val = clean_one_split(val_src, val_dst, args, extra_exclude=val_cross_dups)
+
+    if not args.dry_run:
+        manifest_path = output_dir / "clean_manifest.json"
+        manifest = {
+            "source_split_dir": str(split_dir),
+            "output_dir": str(output_dir),
+            "train_kept": len(kept_train),
+            "val_kept": len(kept_val),
+            "val_cross_duplicates_removed": len(val_cross_dups),
+            "classes": CLASSES,
+            "remove_blur": args.remove_blur,
+            "blur_threshold": args.blur_threshold,
+            "remove_near_dup": args.remove_near_dup,
+            "phash_threshold": args.phash_threshold,
+        }
+        output_dir.mkdir(parents=True, exist_ok=True)
+        with open(manifest_path, "w", encoding="utf-8") as f:
+            json.dump(manifest, f, indent=2, ensure_ascii=False)
+        print(f"\nSaved clean manifest -> {manifest_path}")
 
 
 # -------------------------------------------------------------
@@ -733,8 +863,11 @@ def parse_args() -> argparse.Namespace:
         description="Waste Classification Preprocessing Pipeline"
     )
     p.add_argument("--clean", action="store_true", help="Build Cleaned_Dataset")
+    p.add_argument("--clean-split", action="store_true", help="Clean split-dir/train and split-dir/val separately")
     p.add_argument("--augment", action="store_true", help="Build Augmented_Dataset")
     p.add_argument("--features", action="store_true", help="Extract HOG+Color features")
+    p.add_argument("--split-dir", type=Path, default=DEFAULT_SPLIT_DIR, help="Input split folder with train/val")
+    p.add_argument("--clean-split-output", type=Path, default=DEFAULT_CLEAN_SPLIT_DIR, help="Output folder for cleaned train/val")
     p.add_argument("--dry-run", action="store_true", help="Only print stats, do NOT write files")
     p.add_argument("--remove-blur", action=argparse.BooleanOptionalAction, default=True, help="Remove blurry images (default: on)")
     p.add_argument("--remove-near-dup", action=argparse.BooleanOptionalAction, default=False, help="Run pHash near-duplicate removal (slow, default: off)")
@@ -748,6 +881,10 @@ def parse_args() -> argparse.Namespace:
 
 def main():
     args = parse_args()
+
+    if args.clean_split:
+        clean_train_val_splits(args)
+        return
 
     if not DATA_DIR.exists():
         raise FileNotFoundError(f"Dataset not found: {DATA_DIR}")
