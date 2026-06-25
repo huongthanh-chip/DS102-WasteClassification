@@ -9,7 +9,7 @@ Main usage:
   from dataloader import build_dataloaders
 
   train_loader, val_loader, info = build_dataloaders(
-      data_dir="01-data/Prepared_Merged_Split_60_20_20",
+      data_dir="01-data/Prepared_Merged_Clean_Split_60_20_20",
       batch_size=32,
       use_weighted_sampler=True,
   )
@@ -51,7 +51,7 @@ except Exception:
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_DATA_DIR = PROJECT_ROOT / "01-data" / "Merged_Dataset" / "train"
-DEFAULT_SPLIT_DIR = PROJECT_ROOT / "01-data" / "Prepared_Merged_Split_60_20_20"
+DEFAULT_SPLIT_DIR = PROJECT_ROOT / "01-data" / "Prepared_Merged_Clean_Split_60_20_20"
 DEFAULT_AUGMENTED_TRAIN_DIR = DEFAULT_SPLIT_DIR / "train_augmented"
 DEFAULT_LABEL_MAP = PROJECT_ROOT / "04-features" / "label_map.json"
 DEFAULT_CLASS_WEIGHTS = PROJECT_ROOT / "04-features" / "class_weights.npy"

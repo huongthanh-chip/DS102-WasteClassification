@@ -328,7 +328,10 @@ def find_blurry_images(
                 "is_blurry": (lap_var < threshold) and (lap_var >= 0),
             }
         )
-    df = pd.DataFrame(rows)
+    df = pd.DataFrame(rows, columns=["path", "class", "lap_var", "is_blurry"])
+    if df.empty:
+        print(f"No images found for blur detection in {data_dir}.")
+        return df
     print(f"Blurry images (Laplacian var < {threshold}): {df['is_blurry'].sum()}")
     print(df.groupby("class")["is_blurry"].sum().to_string())
     return df
