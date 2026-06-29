@@ -158,7 +158,7 @@ def make_transforms(
     image_size: int = TARGET_SIZE,
     mean: tuple[float, float, float] = DATASET_MEAN,
     std: tuple[float, float, float] = DATASET_STD,
-    augment_train: bool = True,
+    augment_train: bool = False,
 ) -> tuple[Callable, Callable]:
     if not TORCH_AVAILABLE:
         raise ImportError("PyTorch/torchvision is required to build image transforms.")

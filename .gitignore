@@ -16,8 +16,19 @@ Prepared_Merged_Clean_Split_60_20_20/
 # Generated model artifacts
 05-models/
 
+# Local reports / document exports
+06-reports/
+
 # Generated feature matrices
 04-features/*.npz
+04-features/data_distribution_analysis*/
+04-features/convnext_tiny/
+04-features/densenet121/
+04-features/best_cnn_hybrid/
+
+# Legacy local model folders imported from experiments
+/ConvNeXt_Tiny/
+/DenseNet121/
 
 # Python cache
 **/__pycache__/
