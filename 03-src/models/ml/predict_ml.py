@@ -4,16 +4,20 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 from pathlib import Path
 
 import joblib
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+DATA_SRC = PROJECT_ROOT / "03-src" / "data"
+if str(DATA_SRC) not in sys.path:
+    sys.path.insert(0, str(DATA_SRC))
+
 from dataloader import IMAGE_EXTS, load_label_map
 from feature_engineering import DEFAULT_LABEL_MAP, extract_handcrafted_features
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODEL = PROJECT_ROOT / "05-models" / "handcrafted" / "random_forest.joblib"
 
 

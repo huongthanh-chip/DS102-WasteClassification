@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 from pathlib import Path
 
 import joblib
@@ -22,12 +23,16 @@ from torch.utils.data import DataLoader, Dataset
 from torchvision.models import convnext_tiny
 from tqdm import tqdm
 
-from dataloader import DATASET_MEAN, DATASET_STD, IMAGE_EXTS, TARGET_SIZE, load_label_map
-
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DATA_SRC = PROJECT_ROOT / "03-src" / "data"
+if str(DATA_SRC) not in sys.path:
+    sys.path.insert(0, str(DATA_SRC))
+
+from dataloader import DATASET_MEAN, DATASET_STD, IMAGE_EXTS, TARGET_SIZE, load_label_map
+
 DEFAULT_SPLIT_DIR = PROJECT_ROOT / "01-data" / "Prepared_Merged_Clean_Split_60_20_20"
 DEFAULT_LABEL_MAP = PROJECT_ROOT / "04-features" / "label_map.json"
 DEFAULT_HANDCRAFTED = PROJECT_ROOT / "04-features" / "handcrafted_features.npz"

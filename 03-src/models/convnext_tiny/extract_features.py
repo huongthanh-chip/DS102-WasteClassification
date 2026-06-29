@@ -39,13 +39,17 @@ from torchvision import transforms
 from torchvision.datasets import ImageFolder
 from torchvision.models import convnext_tiny, ConvNeXt_Tiny_Weights
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
 # --------------------------------------------------------------------------- #
 # Paths
 # --------------------------------------------------------------------------- #
 PROJECT_ROOT      = Path(__file__).resolve().parents[3]
-SRC_ROOT          = PROJECT_ROOT / "03-src"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
+DATA_SRC          = PROJECT_ROOT / "03-src" / "data"
+if str(DATA_SRC) not in sys.path:
+    sys.path.insert(0, str(DATA_SRC))
 DEFAULT_TRAIN_DIR = PROJECT_ROOT / "01-data" / "Prepared_Merged_Clean_Split_60_20_20" / "train_augmented"
 DEFAULT_VAL_DIR   = PROJECT_ROOT / "01-data" / "Prepared_Merged_Clean_Split_60_20_20" / "val"
 DEFAULT_CKPT      = PROJECT_ROOT / "05-models" / "convnext_tiny" / "best.pt"

@@ -76,7 +76,7 @@ DATA_DIR   = Path("train")
 CLEAN_DIR  = Path("Cleaned_Dataset/train")
 AUG_DIR    = Path("Augmented_Dataset/train")
 FEAT_DIR   = Path("Features")
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SPLIT_DIR = PROJECT_ROOT / "01-data" / "Prepared_Merged_Split_60_20_20"
 DEFAULT_CLEAN_SPLIT_DIR = PROJECT_ROOT / "01-data" / "Prepared_Merged_Clean_Split_60_20_20"
 

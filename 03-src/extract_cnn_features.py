@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
@@ -10,6 +11,13 @@ import torch
 import torch.nn as nn
 import torchvision.transforms as T
 from PIL import Image
+
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+DATA_SRC = PROJECT_ROOT / "03-src" / "data"
+EFFICIENTNET_SRC = PROJECT_ROOT / "03-src" / "models" / "efficientnet_b0"
+for src_path in (DATA_SRC, EFFICIENTNET_SRC):
+    if str(src_path) not in sys.path:
+        sys.path.insert(0, str(src_path))
 
 from dataloader import (
     DATASET_MEAN,
@@ -19,10 +27,9 @@ from dataloader import (
     load_label_map,
 )
 from feature_engineering import extract_handcrafted_features, train_models
-from train_cnn import create_efficientnet_b0
+from train_efficientnet import create_efficientnet_b0
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_SPLIT_DIR = PROJECT_ROOT / "01-data" / "Prepared_Merged_Clean_Split_60_20_20"
 DEFAULT_FEATURE_DIR = PROJECT_ROOT / "04-features"
 DEFAULT_MODEL_DIR = PROJECT_ROOT / "05-models"

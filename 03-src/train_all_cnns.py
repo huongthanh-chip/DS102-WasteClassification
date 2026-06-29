@@ -41,7 +41,7 @@ def main() -> None:
 
     efficientnet_train = [
         PYTHON,
-        "03-src/train_cnn.py",
+        "03-src/models/efficientnet_b0/train_efficientnet.py",
         "--epochs",
         str(args.epochs),
         "--batch-size",
@@ -52,7 +52,7 @@ def main() -> None:
     ]
     efficientnet_eval = [
         PYTHON,
-        "03-src/evaluate_cnn.py",
+        "03-src/models/efficientnet_b0/evaluate_cnn.py",
         "--checkpoint",
         "05-models/efficientnet_b0/best.pt",
     ]

@@ -22,6 +22,7 @@ Prepared_Merged_Clean_Split_60_20_20/
 # Generated feature matrices
 04-features/*.npz
 04-features/data_distribution_analysis*/
+04-features/handcrafted_feature_analysis/
 04-features/convnext_tiny/
 04-features/densenet121/
 04-features/best_cnn_hybrid/

@@ -17,5 +17,5 @@ The old DenseNet-specific raw feature extraction script is intentionally not
 included in the main pipeline. Use the shared handcrafted feature pipeline:
 
 ```powershell
-python 03-src\feature_engineering.py --use-augmented-train
+python 03-src\data\feature_engineering.py --use-augmented-train
 ```

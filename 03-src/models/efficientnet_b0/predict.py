@@ -3,17 +3,23 @@ from __future__ import annotations
 
 import argparse
 import csv
+import sys
 from pathlib import Path
 
 import torch
 import torchvision.transforms as T
 from PIL import Image
 
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+DATA_SRC = PROJECT_ROOT / "03-src" / "data"
+EFFICIENTNET_SRC = Path(__file__).resolve().parent
+for src_path in (DATA_SRC, EFFICIENTNET_SRC):
+    if str(src_path) not in sys.path:
+        sys.path.insert(0, str(src_path))
+
 from dataloader import IMAGE_EXTS, TARGET_SIZE, DATASET_MEAN, DATASET_STD
-from train_cnn import create_efficientnet_b0
+from train_efficientnet import create_efficientnet_b0
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CHECKPOINT = PROJECT_ROOT / "05-models" / "efficientnet_b0" / "best.pt"
 
 

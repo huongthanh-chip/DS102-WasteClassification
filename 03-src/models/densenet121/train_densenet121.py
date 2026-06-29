@@ -8,18 +8,21 @@ import torch.nn as nn
 from torch.optim import AdamW
 from torch.optim.lr_scheduler import ReduceLROnPlateau
 from torchvision.models import densenet121, DenseNet121_Weights
-from torchmetrics.classification import MulticlassF1Score
 
 from sklearn.svm import SVC
 from sklearn.preprocessing import StandardScaler
 from sklearn.model_selection import GridSearchCV, PredefinedSplit
-from sklearn.metrics import classification_report, accuracy_score
+from sklearn.metrics import classification_report, accuracy_score, f1_score
 import joblib
 
+if hasattr(sys.stdout, "reconfigure"):
+    sys.stdout.reconfigure(encoding="utf-8")
+    sys.stderr.reconfigure(encoding="utf-8")
+
 PROJECT_ROOT = Path(__file__).resolve().parents[3]
-SRC_ROOT = PROJECT_ROOT / "03-src"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
+DATA_SRC = PROJECT_ROOT / "03-src" / "data"
+if str(DATA_SRC) not in sys.path:
+    sys.path.insert(0, str(DATA_SRC))
 
 from dataloader import build_dataloaders_from_train_val_dirs
 
@@ -120,14 +123,15 @@ class DenseNetSVMFeatureExtractor(nn.Module):
 # 2. TRAIN 1 EPOCH / EVALUATE
 # ─────────────────────────────────────────
 # Chạy 1 lượt qua toàn bộ dataset
-def run_epoch(model, loader, criterion, f1_metric, optimizer=None):
+def run_epoch(model, loader, criterion, optimizer=None):
     is_train = optimizer is not None
     # → Xác định đang học (train) hay đang thi (val)
     model.train() if is_train else model.eval()
 
     # Khởi tạo bộ đếm
     total_loss, correct, total = 0.0, 0, 0
-    f1_metric.reset()
+    all_preds = []
+    all_labels = []
 
     with torch.set_grad_enabled(is_train):          # Chỉ tính gradient khi đang train
         for images, labels in loader:               # → Lấy từng batch 32 ảnh ra
@@ -147,14 +151,15 @@ def run_epoch(model, loader, criterion, f1_metric, optimizer=None):
                 optimizer.step()                       # Dựa vào đó điều chỉnh lại model
 
             preds = outputs.argmax(dim=1)              # lấy lớp có xác suất cao nhất làm dự đoán
-            f1_metric.update(preds, labels)
+            all_preds.extend(preds.detach().cpu().tolist())
+            all_labels.extend(labels.detach().cpu().tolist())
 
             # Ghi lại kết quả của batch này
             total_loss += loss.item() * images.size(0) # cộng dồn tổng loss ( tổng độ sai tích lũy)
             correct += (preds == labels).sum().item()  # đếm số dự đoán đúng
             total += images.size(0)                    # đếm tổng số ảnh đã xử lý
 
-    macro_f1 = f1_metric.compute().item()
+    macro_f1 = f1_score(all_labels, all_preds, average="macro", zero_division=0)
     # → Trả về loss trung bình và accuracy của cả lượt
     return total_loss / total, correct / total, macro_f1
 
@@ -168,8 +173,6 @@ def train_model(model, train_loader, val_loader, class_weights, num_classes):
         weight=torch.tensor(class_weights, dtype=torch.float32).to(DEVICE),
         label_smoothing=0.1,
     )
-    f1_metric = MulticlassF1Score(num_classes=num_classes, average="macro").to(DEVICE)
-
     # Phase 1 - Backbone đóng băng: Giữ nguyên toàn bộ kinh nghiệm cũ của DenseNet121, chỉ dạy thêm phần phân loại rác
     print("PHASE 1: Train top layers (backbone frozen)")
     print(f"  lr={LR_P1}  weight_decay={WD_P1}  ES_patience={ES_PATIENCE_P1}")
@@ -188,9 +191,9 @@ def train_model(model, train_loader, val_loader, class_weights, num_classes):
 
     for epoch in range(1, EPOCHS_FT1 + 1):
         # Train
-        train_loss, train_acc, train_f1 = run_epoch(model, train_loader, criterion, f1_metric, optimizer)
+        train_loss, train_acc, train_f1 = run_epoch(model, train_loader, criterion, optimizer)
         # Val
-        val_loss,   val_acc,   val_f1   = run_epoch(model, val_loader,   criterion, f1_metric)
+        val_loss,   val_acc,   val_f1   = run_epoch(model, val_loader,   criterion)
 
 
         prev_lr = optimizer.param_groups[0]["lr"]
@@ -238,9 +241,9 @@ def train_model(model, train_loader, val_loader, class_weights, num_classes):
 
     for epoch in range(1, EPOCHS_FT2 + 1):
         # Train
-        train_loss, train_acc, train_f1 = run_epoch(model, train_loader, criterion, f1_metric, optimizer)
+        train_loss, train_acc, train_f1 = run_epoch(model, train_loader, criterion, optimizer)
         # Val
-        val_loss,   val_acc,   val_f1   = run_epoch(model, val_loader,   criterion, f1_metric)
+        val_loss,   val_acc,   val_f1   = run_epoch(model, val_loader,   criterion)
 
         prev_lr = optimizer.param_groups[0]["lr"]
         scheduler.step(val_loss)

@@ -33,9 +33,9 @@ ImageFile.LOAD_TRUNCATED_IMAGES = True
 # =============================================================================
 
 PROJECT_ROOT      = Path(__file__).resolve().parents[3]
-SRC_ROOT          = PROJECT_ROOT / "03-src"
-if str(SRC_ROOT) not in sys.path:
-    sys.path.insert(0, str(SRC_ROOT))
+DATA_SRC          = PROJECT_ROOT / "03-src" / "data"
+if str(DATA_SRC) not in sys.path:
+    sys.path.insert(0, str(DATA_SRC))
 CHECKPOINT_DIR    = PROJECT_ROOT / "05-models" / "convnext_tiny"
 DEFAULT_SPLIT_DIR = PROJECT_ROOT / "01-data" / "Prepared_Merged_Clean_Split_60_20_20"
 DEFAULT_LABEL_MAP = PROJECT_ROOT / "04-features" / "label_map.json"

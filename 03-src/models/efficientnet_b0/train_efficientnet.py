@@ -4,6 +4,7 @@ from __future__ import annotations
 import argparse
 import csv
 import json
+import sys
 import time
 from pathlib import Path
 
@@ -19,14 +20,17 @@ from sklearn.metrics import (
 from tqdm import tqdm
 from torchvision.models import EfficientNet_B0_Weights, efficientnet_b0
 
+PROJECT_ROOT = Path(__file__).resolve().parents[3]
+DATA_SRC = PROJECT_ROOT / "03-src" / "data"
+if str(DATA_SRC) not in sys.path:
+    sys.path.insert(0, str(DATA_SRC))
+
 from dataloader import (
     DEFAULT_LABEL_MAP,
     build_dataloaders_from_train_val_dirs,
     load_label_map,
 )
 
-
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODEL_DIR = PROJECT_ROOT / "05-models" / "efficientnet_b0"
 DEFAULT_SPLIT_DIR = PROJECT_ROOT / "01-data" / "Prepared_Merged_Clean_Split_60_20_20"
 

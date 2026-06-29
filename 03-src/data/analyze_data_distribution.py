@@ -15,7 +15,7 @@ from PIL import Image, ImageFile
 ImageFile.LOAD_TRUNCATED_IMAGES = True
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SPLIT_DIR = PROJECT_ROOT / "01-data" / "Prepared_Merged_Clean_Split_60_20_20"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "04-features" / "data_distribution_analysis"
 DEFAULT_LABEL_MAP = PROJECT_ROOT / "04-features" / "label_map.json"

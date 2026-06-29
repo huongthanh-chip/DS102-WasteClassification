@@ -18,10 +18,11 @@ The script trains and evaluates:
 
 ## EfficientNet-B0
 
-Primary scripts are still the project-level scripts because other modules import them:
+Primary scripts:
 
-- `03-src/train_cnn.py`
-- `03-src/evaluate_cnn.py`
+- `03-src/models/efficientnet_b0/train_efficientnet.py`
+- `03-src/models/efficientnet_b0/evaluate_cnn.py`
+- `03-src/models/efficientnet_b0/predict.py`
 - `03-src/extract_cnn_features.py`
 
 Model artifacts are saved under:
@@ -51,7 +52,7 @@ DenseNet121 is kept as a CNN baseline. Its old raw feature extraction path
 (`combined_features.py`: HOG/LBP/color inside the DenseNet folder) is not part
 of the main pipeline anymore. The main handcrafted feature pipeline is:
 
-- `03-src/feature_engineering.py`
+- `03-src/data/feature_engineering.py`
 - `04-features/handcrafted_features.npz`
 
 DenseNet artifacts should be under:

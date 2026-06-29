@@ -23,7 +23,7 @@ from skimage.feature import graycomatrix, graycoprops, local_binary_pattern
 from dataloader import IMAGE_EXTS, load_label_map
 
 
-PROJECT_ROOT = Path(__file__).resolve().parents[1]
+PROJECT_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_SPLIT_DIR = PROJECT_ROOT / "01-data" / "Prepared_Merged_Clean_Split_60_20_20"
 DEFAULT_FEATURE_DIR = PROJECT_ROOT / "04-features"
 DEFAULT_MODEL_DIR = PROJECT_ROOT / "05-models"
@@ -143,13 +143,168 @@ def _glcm_features(gray: np.ndarray) -> tuple[list[float], list[str]]:
 
 def _lbp_features(gray: np.ndarray) -> tuple[list[float], list[str]]:
     small = cv2.resize(gray.astype(np.uint8), (128, 128), interpolation=cv2.INTER_AREA)
-    points = 16
-    radius = 2
-    lbp = local_binary_pattern(small, P=points, R=radius, method="uniform")
-    bins = points + 2
-    hist, _ = np.histogram(lbp.ravel(), bins=bins, range=(0, bins), density=True)
-    names = [f"lbp_uniform_{idx:02d}" for idx in range(bins)]
-    return hist.astype(np.float32).tolist(), names
+    feats: list[float] = []
+    names: list[str] = []
+    for radius, points in ((1, 8), (2, 16), (3, 24)):
+        lbp = local_binary_pattern(small, P=points, R=radius, method="uniform")
+        bins = points + 2
+        hist, _ = np.histogram(lbp.ravel(), bins=bins, range=(0, bins), density=True)
+        feats.extend(hist.astype(np.float32).tolist())
+        names.extend([f"lbp_r{radius}_uniform_{idx:02d}" for idx in range(bins)])
+    return feats, names
+
+
+def _gabor_features(gray: np.ndarray) -> tuple[list[float], list[str]]:
+    small = cv2.resize(gray.astype(np.float32) / 255.0, (128, 128), interpolation=cv2.INTER_AREA)
+    feats: list[float] = []
+    names: list[str] = []
+    angles = [0, np.pi / 4, np.pi / 2, 3 * np.pi / 4]
+    lambdas = [4.0, 8.0]
+    for lambda_idx, wavelength in enumerate(lambdas, start=1):
+        for angle_idx, theta in enumerate(angles):
+            kernel = cv2.getGaborKernel(
+                ksize=(15, 15),
+                sigma=4.0,
+                theta=theta,
+                lambd=wavelength,
+                gamma=0.5,
+                psi=0,
+                ktype=cv2.CV_32F,
+            )
+            response = cv2.filter2D(small, cv2.CV_32F, kernel)
+            abs_response = np.abs(response)
+            prefix = f"gabor_l{lambda_idx}_a{angle_idx}"
+            feats.extend(
+                [
+                    float(abs_response.mean()),
+                    float(abs_response.std()),
+                    float(np.mean(abs_response ** 2)),
+                ]
+            )
+            names.extend([f"{prefix}_mean", f"{prefix}_std", f"{prefix}_energy"])
+    return feats, names
+
+
+def _specular_features(gray: np.ndarray, hsv: np.ndarray, edges: np.ndarray) -> tuple[list[float], list[str]]:
+    gray_norm = gray.astype(np.float32) / 255.0
+    saturation = hsv[:, :, 1].astype(np.float32) / 255.0
+    value = hsv[:, :, 2].astype(np.float32) / 255.0
+    highlight_mask = (value > 0.85) & (saturation < 0.25)
+    strong_highlight_mask = (value > 0.92) & (saturation < 0.18)
+    edge_mask = edges > 0
+    if highlight_mask.any():
+        highlight_gray = gray_norm[highlight_mask]
+        highlight_contrast = float(highlight_gray.std())
+        specular_edge_ratio = float((edge_mask & highlight_mask).sum() / max(int(highlight_mask.sum()), 1))
+    else:
+        highlight_contrast = 0.0
+        specular_edge_ratio = 0.0
+    feats = [
+        float(highlight_mask.mean()),
+        float(strong_highlight_mask.mean()),
+        float(((value > 0.75) & (saturation < 0.20)).mean()),
+        specular_edge_ratio,
+        highlight_contrast,
+    ]
+    names = [
+        "highlight_ratio",
+        "strong_highlight_ratio",
+        "low_sat_high_value_ratio",
+        "specular_edge_ratio",
+        "highlight_contrast_std",
+    ]
+    return feats, names
+
+
+def _spatial_grid_features(gray: np.ndarray, hsv: np.ndarray, edges: np.ndarray, grid_size: int = 3) -> tuple[list[float], list[str]]:
+    h, w = gray.shape
+    gray_norm = gray.astype(np.float32) / 255.0
+    saturation = hsv[:, :, 1].astype(np.float32) / 255.0
+    edge_mask = edges > 0
+    feats: list[float] = []
+    names: list[str] = []
+    for row in range(grid_size):
+        for col in range(grid_size):
+            y0 = row * h // grid_size
+            y1 = (row + 1) * h // grid_size
+            x0 = col * w // grid_size
+            x1 = (col + 1) * w // grid_size
+            cell_gray = gray_norm[y0:y1, x0:x1]
+            cell_sat = saturation[y0:y1, x0:x1]
+            cell_edges = edge_mask[y0:y1, x0:x1]
+            prefix = f"grid{grid_size}_{row}_{col}"
+            feats.extend(
+                [
+                    float(cell_gray.mean()),
+                    float(cell_gray.std()),
+                    float(cell_sat.mean()),
+                    float(cell_edges.mean()),
+                ]
+            )
+            names.extend(
+                [
+                    f"{prefix}_brightness_mean",
+                    f"{prefix}_brightness_std",
+                    f"{prefix}_saturation_mean",
+                    f"{prefix}_edge_density",
+                ]
+            )
+    return feats, names
+
+
+def _foreground_shape_features(gray: np.ndarray, hsv: np.ndarray) -> tuple[list[float], list[str]]:
+    gray_u8 = gray.astype(np.uint8)
+    saturation = hsv[:, :, 1].astype(np.float32) / 255.0
+    _, otsu = cv2.threshold(gray_u8, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+    dark_fg = gray_u8 < np.percentile(gray_u8, 70)
+    sat_fg = saturation > 0.18
+    mask = ((otsu > 0) & sat_fg) | dark_fg
+    mask = mask.astype(np.uint8) * 255
+    kernel = np.ones((5, 5), dtype=np.uint8)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_OPEN, kernel)
+    mask = cv2.morphologyEx(mask, cv2.MORPH_CLOSE, kernel)
+    contours, _ = cv2.findContours(mask, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+    h, w = gray.shape
+    image_area = float(h * w)
+    names = [
+        "foreground_area_ratio",
+        "foreground_bbox_area_ratio",
+        "foreground_bbox_aspect_ratio",
+        "foreground_bbox_fill_ratio",
+        "foreground_centroid_x",
+        "foreground_centroid_y",
+        "foreground_perimeter_ratio",
+        "foreground_circularity",
+        "foreground_num_contours",
+    ]
+    if not contours:
+        return [0.0] * len(names), names
+
+    largest = max(contours, key=cv2.contourArea)
+    area = float(cv2.contourArea(largest))
+    x, y, bw, bh = cv2.boundingRect(largest)
+    perimeter = float(cv2.arcLength(largest, True))
+    moments = cv2.moments(largest)
+    if moments["m00"] > 1e-8:
+        cx = float(moments["m10"] / moments["m00"]) / w
+        cy = float(moments["m01"] / moments["m00"]) / h
+    else:
+        cx = (x + bw / 2.0) / w
+        cy = (y + bh / 2.0) / h
+    bbox_area = float(bw * bh)
+    circularity = 0.0 if perimeter <= 1e-8 else float(4.0 * np.pi * area / (perimeter ** 2))
+    feats = [
+        area / image_area,
+        bbox_area / image_area,
+        float(bw / max(bh, 1)),
+        area / max(bbox_area, 1.0),
+        cx,
+        cy,
+        perimeter / max(2.0 * (h + w), 1.0),
+        circularity,
+        float(len(contours)),
+    ]
+    return feats, names
 
 
 def _dominant_color_features(rgb: np.ndarray, n_colors: int = 3) -> tuple[list[float], list[str]]:
@@ -251,6 +406,22 @@ def extract_handcrafted_features(path: str | Path, image_size: int = 224) -> tup
     names.extend(cols)
 
     vals, cols = _lbp_features(gray)
+    features.extend(vals)
+    names.extend(cols)
+
+    vals, cols = _gabor_features(gray)
+    features.extend(vals)
+    names.extend(cols)
+
+    vals, cols = _specular_features(gray, hsv, edges)
+    features.extend(vals)
+    names.extend(cols)
+
+    vals, cols = _spatial_grid_features(gray, hsv, edges, grid_size=3)
+    features.extend(vals)
+    names.extend(cols)
+
+    vals, cols = _foreground_shape_features(gray, hsv)
     features.extend(vals)
     names.extend(cols)
 
