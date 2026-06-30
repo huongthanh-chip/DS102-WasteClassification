@@ -40,12 +40,11 @@ EPOCHS_FT1 = 10             # Phase 1
 EPOCHS_FT2 = 20             # Phase 2 
 FEATURE_DIM = 200           # Số chiều của vector đặc trưng cuối cùng (cho SVM và Kmeans)
 RANDOM_SEED = 42
-UNFREEZE_LAST_N = 50        # Ở Phase 2, chỉ mở khóa 50 layer cuối của DenseNet121
 VAL_SPLIT = 0.25            # Tỉ lệ train/val/test thực tế đã được chia sẵn (thư mục Prepared_Merged_Clean_Split_60_20_20). Biến này không dùng trong script này.
 
 # Optimizer (AdamW)
 LR_P1, WD_P1 = 1e-3, 1e-4   # Phase 1: ít tham số (chỉ head) → decay nhẹ
-LR_P2, WD_P2 = 1e-4, 5e-4   # Phase 2: nhiều tham số hơn (head + 50 layer backbone) → decay mạnh hơn, theo spec nhóm
+LR_P2, WD_P2 = 1e-4, 5e-4   # Phase 2: fine-tune toàn bộ backbone, lr thấp hơn Phase 1 để tránh phá vỡ trọng số pretrained
 
 # ReduceLROnPlateau (chung cho cả 2 phase)
 LR_FACTOR = 0.5
@@ -108,15 +107,10 @@ class DenseNetSVMFeatureExtractor(nn.Module):
     def freeze_backbone(self):
         for p in self.features.parameters():
             p.requires_grad = False
-    # DenseNet121 bên trong gồm nhiều block xếp chồng lên nhau
-    def unfreeze_last_n_layers(self, n: int):
-        children = list(self.features.children())
+    def unfreeze_backbone(self):
+        # Mở khóa toàn bộ backbone cho Phase 2.
         for p in self.features.parameters():
-            p.requires_grad = False                             # Đóng băng tất cả trước
-        for layer in children[-n:]:                             # Lấy n block cuối cùng
-            for p in layer.parameters():
-                p.requires_grad = True                          # Chỉ mở khóa n block đó
-# Chỉ cho phép n block cuối được điều chỉnh trong Phase 2. Các block đầu vẫn giữ nguyên vì chúng học những thứ cơ bản không cần thay đổi.
+            p.requires_grad = True
 
 
 # ─────────────────────────────────────────
@@ -220,16 +214,16 @@ def train_model(model, train_loader, val_loader, class_weights, num_classes):
     model.load_state_dict(torch.load(OUTPUT_DIR / "best_phase1.pt", map_location=DEVICE))
     print(f"  Best val_macro_f1 Phase 1: {best_val_f1:.4f}")
 
-    # Phase 2 - fine-tune 50 layer cuối: Tinh chỉnh lại 50 layer cuối để phù hợp hơn với bài toán phân loại rác 
-    print(f"PHASE 2: Fine-tune {UNFREEZE_LAST_N} layers cuối")
+    # Phase 2 - fine-tune toàn bộ backbone với lr thấp hơn Phase 1
+    print("PHASE 2: Fine-tune toàn bộ backbone (lr thấp hơn Phase 1)")
     print(f"  lr={LR_P2}  weight_decay={WD_P2}  ES_patience={ES_PATIENCE_P2}")
     print("=" * 50)
 
-    model.unfreeze_last_n_layers(UNFREEZE_LAST_N)       # mở khóa 50 layer cuối của DenseNet121
+    model.unfreeze_backbone()
     trainable = sum(p.requires_grad for p in model.features.parameters())
     total_p = sum(1 for _ in model.features.parameters())
-    print(f"  Layers unfreeze: {trainable}/{total_p}")
-
+    print(f"  unfreeze {trainable}/{total_p} parameter tensors (full fine-tune)")
+    
     # Tốc độ học nhỏ hơn Phase 1 - chỉ tinh chỉnh nhẹ, không phá vỡ những gì đã học
     optimizer = AdamW(
         filter(lambda p: p.requires_grad, model.parameters()),
