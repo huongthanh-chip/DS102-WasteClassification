@@ -171,7 +171,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=DEFAULT_OUTPUT_DIR)
     parser.add_argument("--variance-threshold", type=float, default=1e-8)
     parser.add_argument("--correlation-threshold", type=float, default=0.95)
-    parser.add_argument("--top-k", type=int, default=120)
+    parser.add_argument(
+        "--top-k",
+        type=int,
+        default=None,
+        help="Optional cap after correlation filtering. Default keeps all non-redundant features.",
+    )
     parser.add_argument("--max-corr-pairs", type=int, default=5000)
     return parser.parse_args()
 

@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 
-os.environ.setdefault("LOKY_MAX_CPU_COUNT", str(os.cpu_count() or 1))
+os.environ.setdefault("LOKY_MAX_CPU_COUNT", "1")
 
 import cv2
 import joblib
@@ -185,6 +185,75 @@ def _gabor_features(gray: np.ndarray) -> tuple[list[float], list[str]]:
     return feats, names
 
 
+def _haar_wavelet_features(gray: np.ndarray) -> tuple[list[float], list[str]]:
+    current = cv2.resize(gray.astype(np.float32) / 255.0, (128, 128), interpolation=cv2.INTER_AREA)
+    feats: list[float] = []
+    names: list[str] = []
+    for level in (1, 2):
+        even = current[: current.shape[0] // 2 * 2, : current.shape[1] // 2 * 2]
+        a = even[0::2, 0::2]
+        b = even[0::2, 1::2]
+        c = even[1::2, 0::2]
+        d = even[1::2, 1::2]
+        subbands = {
+            "ll": (a + b + c + d) / 4.0,
+            "lh": (a - b + c - d) / 4.0,
+            "hl": (a + b - c - d) / 4.0,
+            "hh": (a - b - c + d) / 4.0,
+        }
+        for band_name, band in subbands.items():
+            abs_band = np.abs(band)
+            feats.extend(
+                [
+                    float(abs_band.mean()),
+                    float(abs_band.std()),
+                    float(np.mean(abs_band ** 2)),
+                ]
+            )
+            names.extend(
+                [
+                    f"haar_l{level}_{band_name}_mean_abs",
+                    f"haar_l{level}_{band_name}_std_abs",
+                    f"haar_l{level}_{band_name}_energy",
+                ]
+            )
+        current = subbands["ll"]
+    return feats, names
+
+
+def _multiscale_texture_features(gray: np.ndarray) -> tuple[list[float], list[str]]:
+    feats: list[float] = []
+    names: list[str] = []
+    for size in (64, 128, 224):
+        small = cv2.resize(gray.astype(np.uint8), (size, size), interpolation=cv2.INTER_AREA)
+        small_float = small.astype(np.float32)
+        lap = cv2.Laplacian(small_float, cv2.CV_32F)
+        grad_x = cv2.Sobel(small_float, cv2.CV_32F, 1, 0, ksize=3)
+        grad_y = cv2.Sobel(small_float, cv2.CV_32F, 0, 1, ksize=3)
+        grad_mag = cv2.magnitude(grad_x, grad_y)
+        edges = cv2.Canny(small, 100, 200)
+        entropy, _ = _entropy_from_uint8(small, f"unused_{size}")
+        feats.extend(
+            [
+                entropy[0],
+                float(lap.var()),
+                float((edges > 0).mean()),
+                float(grad_mag.mean()),
+                float(grad_mag.std()),
+            ]
+        )
+        names.extend(
+            [
+                f"multiscale_{size}_gray_entropy",
+                f"multiscale_{size}_laplacian_var",
+                f"multiscale_{size}_edge_density",
+                f"multiscale_{size}_gradient_mean",
+                f"multiscale_{size}_gradient_std",
+            ]
+        )
+    return feats, names
+
+
 def _specular_features(gray: np.ndarray, hsv: np.ndarray, edges: np.ndarray) -> tuple[list[float], list[str]]:
     gray_norm = gray.astype(np.float32) / 255.0
     saturation = hsv[:, :, 1].astype(np.float32) / 255.0
@@ -192,10 +261,28 @@ def _specular_features(gray: np.ndarray, hsv: np.ndarray, edges: np.ndarray) -> 
     highlight_mask = (value > 0.85) & (saturation < 0.25)
     strong_highlight_mask = (value > 0.92) & (saturation < 0.18)
     edge_mask = edges > 0
+    highlight_components = 0
+    largest_highlight_ratio = 0.0
+    highlight_centroid_x = 0.0
+    highlight_centroid_y = 0.0
+    highlight_value_mean = 0.0
+    highlight_saturation_mean = 0.0
     if highlight_mask.any():
         highlight_gray = gray_norm[highlight_mask]
         highlight_contrast = float(highlight_gray.std())
         specular_edge_ratio = float((edge_mask & highlight_mask).sum() / max(int(highlight_mask.sum()), 1))
+        highlight_value_mean = float(value[highlight_mask].mean())
+        highlight_saturation_mean = float(saturation[highlight_mask].mean())
+        highlight_u8 = highlight_mask.astype(np.uint8) * 255
+        contours, _ = cv2.findContours(highlight_u8, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        highlight_components = len(contours)
+        if contours:
+            largest = max(contours, key=cv2.contourArea)
+            largest_highlight_ratio = float(cv2.contourArea(largest) / max(float(gray.size), 1.0))
+            moments = cv2.moments(largest)
+            if moments["m00"] > 1e-8:
+                highlight_centroid_x = float(moments["m10"] / moments["m00"]) / gray.shape[1]
+                highlight_centroid_y = float(moments["m01"] / moments["m00"]) / gray.shape[0]
     else:
         highlight_contrast = 0.0
         specular_edge_ratio = 0.0
@@ -205,6 +292,12 @@ def _specular_features(gray: np.ndarray, hsv: np.ndarray, edges: np.ndarray) -> 
         float(((value > 0.75) & (saturation < 0.20)).mean()),
         specular_edge_ratio,
         highlight_contrast,
+        float(highlight_components),
+        largest_highlight_ratio,
+        highlight_centroid_x,
+        highlight_centroid_y,
+        highlight_value_mean,
+        highlight_saturation_mean,
     ]
     names = [
         "highlight_ratio",
@@ -212,6 +305,12 @@ def _specular_features(gray: np.ndarray, hsv: np.ndarray, edges: np.ndarray) -> 
         "low_sat_high_value_ratio",
         "specular_edge_ratio",
         "highlight_contrast_std",
+        "highlight_component_count",
+        "largest_highlight_area_ratio",
+        "highlight_centroid_x",
+        "highlight_centroid_y",
+        "highlight_value_mean",
+        "highlight_saturation_mean",
     ]
     return feats, names
 
@@ -252,6 +351,53 @@ def _spatial_grid_features(gray: np.ndarray, hsv: np.ndarray, edges: np.ndarray,
     return feats, names
 
 
+def _center_border_features(gray: np.ndarray, hsv: np.ndarray, edges: np.ndarray) -> tuple[list[float], list[str]]:
+    h, w = gray.shape
+    gray_norm = gray.astype(np.float32) / 255.0
+    saturation = hsv[:, :, 1].astype(np.float32) / 255.0
+    edge_mask = edges > 0
+    y0, y1 = h // 4, 3 * h // 4
+    x0, x1 = w // 4, 3 * w // 4
+    center_mask = np.zeros_like(gray_norm, dtype=bool)
+    center_mask[y0:y1, x0:x1] = True
+    border_mask = ~center_mask
+
+    def mean_on(arr: np.ndarray, mask: np.ndarray) -> float:
+        return float(arr[mask].mean()) if mask.any() else 0.0
+
+    center_brightness = mean_on(gray_norm, center_mask)
+    border_brightness = mean_on(gray_norm, border_mask)
+    center_saturation = mean_on(saturation, center_mask)
+    border_saturation = mean_on(saturation, border_mask)
+    center_edge = mean_on(edge_mask.astype(np.float32), center_mask)
+    border_edge = mean_on(edge_mask.astype(np.float32), border_mask)
+    feats = [
+        center_brightness,
+        border_brightness,
+        center_brightness - border_brightness,
+        center_saturation,
+        border_saturation,
+        center_saturation - border_saturation,
+        center_edge,
+        border_edge,
+        center_edge - border_edge,
+        float(abs(center_brightness - border_brightness) + abs(center_saturation - border_saturation)),
+    ]
+    names = [
+        "center_brightness_mean",
+        "border_brightness_mean",
+        "center_border_brightness_diff",
+        "center_saturation_mean",
+        "border_saturation_mean",
+        "center_border_saturation_diff",
+        "center_edge_density",
+        "border_edge_density",
+        "center_border_edge_diff",
+        "center_border_object_contrast",
+    ]
+    return feats, names
+
+
 def _foreground_shape_features(gray: np.ndarray, hsv: np.ndarray) -> tuple[list[float], list[str]]:
     gray_u8 = gray.astype(np.uint8)
     saturation = hsv[:, :, 1].astype(np.float32) / 255.0
@@ -276,12 +422,20 @@ def _foreground_shape_features(gray: np.ndarray, hsv: np.ndarray) -> tuple[list[
         "foreground_perimeter_ratio",
         "foreground_circularity",
         "foreground_num_contours",
+        "foreground_total_area_ratio",
+        "foreground_solidity",
+        "foreground_convex_area_ratio",
+        "foreground_boundary_roughness",
+        "foreground_centroid_distance_from_center",
+        "foreground_extent",
+        "foreground_ellipse_eccentricity",
     ]
     if not contours:
         return [0.0] * len(names), names
 
     largest = max(contours, key=cv2.contourArea)
     area = float(cv2.contourArea(largest))
+    total_area = float(sum(cv2.contourArea(contour) for contour in contours))
     x, y, bw, bh = cv2.boundingRect(largest)
     perimeter = float(cv2.arcLength(largest, True))
     moments = cv2.moments(largest)
@@ -292,7 +446,20 @@ def _foreground_shape_features(gray: np.ndarray, hsv: np.ndarray) -> tuple[list[
         cx = (x + bw / 2.0) / w
         cy = (y + bh / 2.0) / h
     bbox_area = float(bw * bh)
+    hull = cv2.convexHull(largest)
+    convex_area = float(cv2.contourArea(hull))
     circularity = 0.0 if perimeter <= 1e-8 else float(4.0 * np.pi * area / (perimeter ** 2))
+    solidity = area / max(convex_area, 1.0)
+    boundary_roughness = perimeter / max(2.0 * np.sqrt(np.pi * max(area, 1.0)), 1.0)
+    centroid_distance = float(np.sqrt((cx - 0.5) ** 2 + (cy - 0.5) ** 2))
+    extent = area / max(bbox_area, 1.0)
+    eccentricity = 0.0
+    if len(largest) >= 5:
+        (_, _), (axis_a, axis_b), _ = cv2.fitEllipse(largest)
+        major = max(axis_a, axis_b)
+        minor = min(axis_a, axis_b)
+        if major > 1e-8:
+            eccentricity = float(np.sqrt(max(0.0, 1.0 - (minor / major) ** 2)))
     feats = [
         area / image_area,
         bbox_area / image_area,
@@ -303,6 +470,13 @@ def _foreground_shape_features(gray: np.ndarray, hsv: np.ndarray) -> tuple[list[
         perimeter / max(2.0 * (h + w), 1.0),
         circularity,
         float(len(contours)),
+        total_area / image_area,
+        solidity,
+        convex_area / image_area,
+        boundary_roughness,
+        centroid_distance,
+        extent,
+        eccentricity,
     ]
     return feats, names
 
@@ -413,11 +587,27 @@ def extract_handcrafted_features(path: str | Path, image_size: int = 224) -> tup
     features.extend(vals)
     names.extend(cols)
 
+    vals, cols = _haar_wavelet_features(gray)
+    features.extend(vals)
+    names.extend(cols)
+
+    vals, cols = _multiscale_texture_features(gray)
+    features.extend(vals)
+    names.extend(cols)
+
     vals, cols = _specular_features(gray, hsv, edges)
     features.extend(vals)
     names.extend(cols)
 
     vals, cols = _spatial_grid_features(gray, hsv, edges, grid_size=3)
+    features.extend(vals)
+    names.extend(cols)
+
+    vals, cols = _spatial_grid_features(gray, hsv, edges, grid_size=4)
+    features.extend(vals)
+    names.extend(cols)
+
+    vals, cols = _center_border_features(gray, hsv, edges)
     features.extend(vals)
     names.extend(cols)
 

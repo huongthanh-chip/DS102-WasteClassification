@@ -18,7 +18,6 @@ from sklearn.linear_model import LogisticRegression
 from sklearn.metrics import accuracy_score, classification_report, confusion_matrix
 from sklearn.pipeline import Pipeline
 from sklearn.preprocessing import StandardScaler
-from sklearn.svm import LinearSVC
 from torch.utils.data import DataLoader, Dataset
 from torchvision.models import convnext_tiny
 from tqdm import tqdm
@@ -39,6 +38,14 @@ DEFAULT_HANDCRAFTED = PROJECT_ROOT / "04-features" / "handcrafted_features.npz"
 DEFAULT_CONVNEXT_CHECKPOINT = PROJECT_ROOT / "05-models" / "convnext_tiny" / "best.pt"
 DEFAULT_FEATURE_DIR = PROJECT_ROOT / "04-features" / "best_cnn_hybrid"
 DEFAULT_MODEL_DIR = PROJECT_ROOT / "05-models" / "best_cnn_hybrid"
+
+
+def require_lightgbm():
+    try:
+        from lightgbm import LGBMClassifier, early_stopping, log_evaluation
+    except ImportError as exc:
+        raise ImportError("LightGBM is not installed. Install it with: pip install lightgbm") from exc
+    return LGBMClassifier, early_stopping, log_evaluation
 
 
 def list_images(split_dir: Path, split: str, label_map: dict[str, int]):
@@ -194,9 +201,10 @@ def save_predictions(path: Path, paths, y_true, y_pred, idx_to_class: dict[int, 
             )
 
 
-def train_hybrid_classifiers(arrays: dict, label_map: dict[str, int], model_dir: Path):
+def train_hybrid_classifiers(arrays: dict, label_map: dict[str, int], model_dir: Path, args: argparse.Namespace):
     model_dir.mkdir(parents=True, exist_ok=True)
     idx_to_class = {idx: cls for cls, idx in label_map.items()}
+    LGBMClassifier, early_stopping, log_evaluation = require_lightgbm()
     models = {
         "softmax_regression": Pipeline(
             [
@@ -211,21 +219,6 @@ def train_hybrid_classifiers(arrays: dict, label_map: dict[str, int], model_dir:
                 ),
             ]
         ),
-        "linear_svm": Pipeline(
-            [
-                ("scaler", StandardScaler()),
-                (
-                    "clf",
-                    LinearSVC(
-                        C=1.0,
-                        class_weight="balanced",
-                        max_iter=10000,
-                        dual="auto",
-                        random_state=42,
-                    ),
-                ),
-            ]
-        ),
         "random_forest": RandomForestClassifier(
             n_estimators=500,
             min_samples_leaf=2,
@@ -233,12 +226,41 @@ def train_hybrid_classifiers(arrays: dict, label_map: dict[str, int], model_dir:
             n_jobs=1,
             random_state=42,
         ),
+        "lightgbm": LGBMClassifier(
+            objective="multiclass",
+            num_class=len(label_map),
+            n_estimators=args.lightgbm_n_estimators,
+            learning_rate=args.lightgbm_learning_rate,
+            num_leaves=args.lightgbm_num_leaves,
+            max_depth=args.lightgbm_max_depth,
+            min_child_samples=args.lightgbm_min_child_samples,
+            subsample=args.lightgbm_subsample,
+            colsample_bytree=args.lightgbm_colsample_bytree,
+            reg_alpha=args.lightgbm_reg_alpha,
+            reg_lambda=args.lightgbm_reg_lambda,
+            class_weight="balanced",
+            random_state=42,
+            n_jobs=args.lightgbm_num_threads,
+            verbosity=-1,
+        ),
     }
 
     all_metrics = {}
     for name, model in models.items():
         print(f"\n=== Train {name} ===")
-        model.fit(arrays["X_train"], arrays["y_train"])
+        if name == "lightgbm":
+            model.fit(
+                arrays["X_train"],
+                arrays["y_train"],
+                eval_set=[(arrays["X_val"], arrays["y_val"])],
+                eval_metric="multi_logloss",
+                callbacks=[
+                    early_stopping(args.lightgbm_early_stopping_rounds, verbose=True),
+                    log_evaluation(period=25),
+                ],
+            )
+        else:
+            model.fit(arrays["X_train"], arrays["y_train"])
         joblib.dump(model, model_dir / f"{name}.joblib")
         metrics, predictions = evaluate_model(model, arrays, idx_to_class)
         all_metrics[name] = metrics
@@ -257,6 +279,22 @@ def train_hybrid_classifiers(arrays: dict, label_map: dict[str, int], model_dir:
                 idx_to_class,
             )
 
+    with open(model_dir / "lightgbm_params.json", "w", encoding="utf-8") as f:
+        json.dump(
+            {
+                "num_leaves": args.lightgbm_num_leaves,
+                "max_depth": args.lightgbm_max_depth,
+                "colsample_bytree": args.lightgbm_colsample_bytree,
+                "min_child_samples": args.lightgbm_min_child_samples,
+                "reg_alpha": args.lightgbm_reg_alpha,
+                "reg_lambda": args.lightgbm_reg_lambda,
+                "learning_rate": args.lightgbm_learning_rate,
+                "n_estimators": args.lightgbm_n_estimators,
+                "early_stopping_rounds": args.lightgbm_early_stopping_rounds,
+            },
+            f,
+            indent=2,
+        )
     with open(model_dir / "metrics.json", "w", encoding="utf-8") as f:
         json.dump(all_metrics, f, indent=2, ensure_ascii=False)
     print(f"\nSaved hybrid models and metrics -> {model_dir}")
@@ -264,7 +302,7 @@ def train_hybrid_classifiers(arrays: dict, label_map: dict[str, int], model_dir:
 
 def parse_args():
     parser = argparse.ArgumentParser(
-        description="Use the best CNN backbone features with handcrafted features for RF/SVM/Softmax baselines."
+        description="Use the best CNN backbone features with handcrafted features for Softmax/RF/LightGBM baselines."
     )
     parser.add_argument("--split-dir", type=Path, default=DEFAULT_SPLIT_DIR)
     parser.add_argument("--label-map", type=Path, default=DEFAULT_LABEL_MAP)
@@ -276,6 +314,17 @@ def parse_args():
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--skip-extract", action="store_true")
     parser.add_argument("--skip-train", action="store_true")
+    parser.add_argument("--lightgbm-num-leaves", type=int, default=31)
+    parser.add_argument("--lightgbm-max-depth", type=int, default=7)
+    parser.add_argument("--lightgbm-colsample-bytree", type=float, default=0.5)
+    parser.add_argument("--lightgbm-min-child-samples", type=int, default=30)
+    parser.add_argument("--lightgbm-reg-alpha", type=float, default=0.5)
+    parser.add_argument("--lightgbm-reg-lambda", type=float, default=3.0)
+    parser.add_argument("--lightgbm-learning-rate", type=float, default=0.03)
+    parser.add_argument("--lightgbm-n-estimators", type=int, default=2000)
+    parser.add_argument("--lightgbm-subsample", type=float, default=0.85)
+    parser.add_argument("--lightgbm-early-stopping-rounds", type=int, default=80)
+    parser.add_argument("--lightgbm-num-threads", type=int, default=1)
     return parser.parse_args()
 
 
@@ -316,7 +365,7 @@ def main():
     print(f"Saved hybrid features -> {hybrid_path}")
 
     if not args.skip_train:
-        train_hybrid_classifiers(hybrid_arrays, label_map, args.model_dir)
+        train_hybrid_classifiers(hybrid_arrays, label_map, args.model_dir, args)
 
 
 if __name__ == "__main__":
