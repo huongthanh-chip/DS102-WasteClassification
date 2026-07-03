@@ -13,8 +13,10 @@ Merged_Dataset/
 Prepared_Merged_Split_60_20_20/
 Prepared_Merged_Clean_Split_60_20_20/
 
-# Generated model artifacts
-05-models/
+# Large generated model artifacts
+05-models/convnext_tiny/best.pt
+05-models/convnext_tiny/last.pt
+05-models/handcrafted/random_forest.joblib
 
 # Local reports / document exports
 06-reports/

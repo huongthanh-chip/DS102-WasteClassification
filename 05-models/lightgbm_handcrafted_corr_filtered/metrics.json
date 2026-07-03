@@ -1,0 +1,321 @@
+{
+  "feature_path": "D:\\DS102-WasteClassification\\04-features\\handcrafted_feature_analysis\\selected_handcrafted_features.npz",
+  "feature_dim": 314,
+  "train_size": 20954,
+  "val_size": 4421,
+  "best_iteration": 483,
+  "params": {
+    "features": "D:\\DS102-WasteClassification\\04-features\\handcrafted_feature_analysis\\selected_handcrafted_features.npz",
+    "label_map": "D:\\DS102-WasteClassification\\04-features\\label_map.json",
+    "output_dir": "D:\\DS102-WasteClassification\\05-models\\lightgbm_handcrafted_corr_filtered",
+    "num_leaves": 63,
+    "learning_rate": 0.03,
+    "n_estimators": 2000,
+    "max_depth": -1,
+    "min_child_samples": 20,
+    "subsample": 0.85,
+    "colsample_bytree": 0.85,
+    "reg_alpha": 0.1,
+    "reg_lambda": 1.0,
+    "early_stopping_rounds": 80,
+    "num_threads": 1,
+    "random_state": 42
+  },
+  "val": {
+    "accuracy": 0.6650079167609139,
+    "classification_report": {
+      "Electronics": {
+        "precision": 0.66875,
+        "recall": 0.6970684039087948,
+        "f1-score": 0.682615629984051,
+        "support": 614.0
+      },
+      "Glass": {
+        "precision": 0.6194225721784777,
+        "recall": 0.5351473922902494,
+        "f1-score": 0.5742092457420924,
+        "support": 441.0
+      },
+      "Metal": {
+        "precision": 0.6851851851851852,
+        "recall": 0.5967741935483871,
+        "f1-score": 0.6379310344827587,
+        "support": 558.0
+      },
+      "Organic": {
+        "precision": 0.7096018735362998,
+        "recall": 0.7231503579952268,
+        "f1-score": 0.7163120567375887,
+        "support": 419.0
+      },
+      "Other": {
+        "precision": 0.4426229508196721,
+        "recall": 0.6308411214953271,
+        "f1-score": 0.5202312138728323,
+        "support": 214.0
+      },
+      "Paper": {
+        "precision": 0.6711491442542787,
+        "recall": 0.6638452237001209,
+        "f1-score": 0.6674772036474164,
+        "support": 827.0
+      },
+      "Plastic": {
+        "precision": 0.7229219143576826,
+        "recall": 0.7473958333333334,
+        "f1-score": 0.734955185659411,
+        "support": 1152.0
+      },
+      "Textiles": {
+        "precision": 0.5491329479768786,
+        "recall": 0.4846938775510204,
+        "f1-score": 0.5149051490514905,
+        "support": 196.0
+      },
+      "accuracy": 0.6650079167609139,
+      "macro avg": {
+        "precision": 0.6335983235385594,
+        "recall": 0.6348645504778074,
+        "f1-score": 0.6310795898972053,
+        "support": 4421.0
+      },
+      "weighted avg": {
+        "precision": 0.6680914113533065,
+        "recall": 0.6650079167609139,
+        "f1-score": 0.6648666486034454,
+        "support": 4421.0
+      }
+    },
+    "confusion_matrix": [
+      [
+        428,
+        20,
+        23,
+        11,
+        43,
+        36,
+        40,
+        13
+      ],
+      [
+        26,
+        236,
+        32,
+        16,
+        19,
+        33,
+        74,
+        5
+      ],
+      [
+        39,
+        19,
+        333,
+        27,
+        45,
+        37,
+        48,
+        10
+      ],
+      [
+        3,
+        7,
+        15,
+        303,
+        14,
+        39,
+        32,
+        6
+      ],
+      [
+        46,
+        8,
+        10,
+        7,
+        135,
+        6,
+        0,
+        2
+      ],
+      [
+        46,
+        29,
+        30,
+        20,
+        19,
+        549,
+        110,
+        24
+      ],
+      [
+        46,
+        59,
+        31,
+        34,
+        26,
+        77,
+        861,
+        18
+      ],
+      [
+        6,
+        3,
+        12,
+        9,
+        4,
+        41,
+        26,
+        95
+      ]
+    ]
+  },
+  "test": {
+    "accuracy": 0.7218274111675127,
+    "classification_report": {
+      "Electronics": {
+        "precision": 0.6826347305389222,
+        "recall": 0.7272727272727273,
+        "f1-score": 0.7042471042471042,
+        "support": 627.0
+      },
+      "Glass": {
+        "precision": 0.714828897338403,
+        "recall": 0.7189292543021033,
+        "f1-score": 0.7168732125834127,
+        "support": 523.0
+      },
+      "Metal": {
+        "precision": 0.7286432160804021,
+        "recall": 0.6671779141104295,
+        "f1-score": 0.6965572457966374,
+        "support": 652.0
+      },
+      "Organic": {
+        "precision": 0.7601626016260162,
+        "recall": 0.7663934426229508,
+        "f1-score": 0.763265306122449,
+        "support": 488.0
+      },
+      "Other": {
+        "precision": 0.492,
+        "recall": 0.5694444444444444,
+        "f1-score": 0.5278969957081545,
+        "support": 216.0
+      },
+      "Paper": {
+        "precision": 0.7285223367697594,
+        "recall": 0.7114093959731543,
+        "f1-score": 0.7198641765704584,
+        "support": 894.0
+      },
+      "Plastic": {
+        "precision": 0.7811572700296736,
+        "recall": 0.7941176470588235,
+        "f1-score": 0.787584143605086,
+        "support": 1326.0
+      },
+      "Textiles": {
+        "precision": 0.5964912280701754,
+        "recall": 0.5125628140703518,
+        "f1-score": 0.5513513513513514,
+        "support": 199.0
+      },
+      "accuracy": 0.7218274111675127,
+      "macro avg": {
+        "precision": 0.685555035056669,
+        "recall": 0.6834134549818731,
+        "f1-score": 0.6834549419980818,
+        "support": 4925.0
+      },
+      "weighted avg": {
+        "precision": 0.7228405034215805,
+        "recall": 0.7218274111675127,
+        "f1-score": 0.7217779160319667,
+        "support": 4925.0
+      }
+    },
+    "confusion_matrix": [
+      [
+        456,
+        34,
+        22,
+        10,
+        44,
+        19,
+        30,
+        12
+      ],
+      [
+        28,
+        376,
+        24,
+        12,
+        12,
+        22,
+        48,
+        1
+      ],
+      [
+        37,
+        18,
+        435,
+        18,
+        38,
+        33,
+        62,
+        11
+      ],
+      [
+        8,
+        16,
+        8,
+        374,
+        7,
+        43,
+        28,
+        4
+      ],
+      [
+        55,
+        1,
+        20,
+        6,
+        123,
+        6,
+        4,
+        1
+      ],
+      [
+        34,
+        25,
+        37,
+        31,
+        13,
+        636,
+        96,
+        22
+      ],
+      [
+        46,
+        51,
+        43,
+        34,
+        12,
+        69,
+        1053,
+        18
+      ],
+      [
+        4,
+        5,
+        8,
+        7,
+        1,
+        45,
+        27,
+        102
+      ]
+    ]
+  },
+  "test_size": 4925
+}
